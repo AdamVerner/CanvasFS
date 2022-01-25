@@ -1,0 +1,5 @@
+venv/
+*.pyc
+mnt/
+.idea/
+token.txt
