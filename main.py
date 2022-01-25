@@ -4,8 +4,10 @@ from __future__ import with_statement
 
 import os
 from errno import ENOENT, ENODATA, ENONET
+from functools import lru_cache
 from stat import S_IFDIR, S_IFLNK, S_IFREG
 from time import time
+from typing import List
 
 import canvasapi.exceptions
 import canvasapi.file
@@ -27,22 +29,28 @@ class Passthrough(LoggingMixIn, Operations):
         self.user = self.canvas.get_user('self')
         self.open_files = dict()
 
-    def _get_file(self, path):
+    @lru_cache
+    def _resolve_path(self, path) -> List[canvasapi.folder.Folder]:
+        return [*self.user.resolve_path(path)]
+
+    @lru_cache
+    def _get_file(self, path) -> canvasapi.file.File:
         try:
             file_path = os.path.join(*os.path.split(path)[:-1])
             file_name = os.path.split(path)[-1]
 
-            folder = [*self.user.resolve_path(file_path)][-1]
+            folder = self._resolve_path(file_path)[-1]
             fc = [*filter(lambda f: f.display_name == file_name, folder.get_files())]
             return fc[0]
         except IndexError:
             raise FuseOSError(ENOENT)
 
+    @lru_cache
     def getattr(self, path, fh=None):
         print(f'getattr(self, "{path}", {fh})')
 
         try:
-            folders = [*self.user.resolve_path(path)]
+            folders = self._resolve_path(path)
             folder: canvasapi.folder.Folder
             folder = folders[-1]
 
@@ -76,10 +84,11 @@ class Passthrough(LoggingMixIn, Operations):
         print(f'getxattr(self, {path}, "{name}", {position})')
         raise FuseOSError(ENODATA)
 
+    @lru_cache
     def readdir(self, path, fh):
         print(f'readdir(self, {path}, {fh})')
 
-        rp = [*self.user.resolve_path(path)]
+        rp = self._resolve_path(path)
         if not rp:
             return FuseOSError(ENONET)  # No such file or directory
 
@@ -97,20 +106,23 @@ class Passthrough(LoggingMixIn, Operations):
             parent_folder = os.path.join(*os.path.split(path)[:-1])
             folder_name = os.path.split(path)[-1]
 
-            folder = [*self.user.resolve_path(parent_folder)][-1]
-            print('folder = ', folder)
-            nf = folder.create_folder(folder_name)
-            print('nf = ', nf)
+            folder = self._resolve_path(parent_folder)[-1]
+            folder.create_folder(folder_name)
 
+            # TODO custom push entry or at least refetch in other thread
+            self._resolve_path.cache_clear()
         except IndexError:
             raise FuseOSError(ENOENT)
 
     def rmdir(self, path):
         print(f'rmdir(self, {path})')
         try:
-            folder = [*self.user.resolve_path(path)][-1]
+            folder = self._resolve_path(path)[-1]
             print('folder = ', folder)
             folder.delete()
+
+            # TODO invalidate only single entry
+            self._resolve_path.cache_clear()
         except IndexError:
             raise FuseOSError(ENOENT)
 
