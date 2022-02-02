@@ -2,22 +2,27 @@
 
 from __future__ import with_statement
 
+import logging
 import os
+import sys
 from errno import ENOENT, ENODATA, ENONET
 from functools import lru_cache
+from pathlib import Path
 from stat import S_IFDIR, S_IFLNK, S_IFREG
 from time import time
-from typing import List
+from typing import List, Any
 
 import canvasapi.exceptions
 import canvasapi.file
 import canvasapi.folder
 from canvasapi import Canvas
 from fuse import FUSE, FuseOSError, Operations, LoggingMixIn
+from autologging import traced, TRACE
 
 API_URL = 'https://hvl.instructure.com'
 
 
+@traced
 class Passthrough(LoggingMixIn, Operations):
 
     fd = 0
@@ -28,31 +33,63 @@ class Passthrough(LoggingMixIn, Operations):
         self.canvas = Canvas(API_URL, access_token)
         self.user = self.canvas.get_user('self')
         self.open_files = dict()
+        self.map = {course.name: course for course in [*self.user.get_courses(), self.user]}
 
     @lru_cache
-    def _resolve_path(self, path) -> List[canvasapi.folder.Folder]:
-        return [*self.user.resolve_path(path)]
+    def _resolve_path(self, path: str, resource=None) -> List[canvasapi.folder.Folder]:
+        resource = resource or self.user
+        return [*resource.resolve_path(path)]
 
     @lru_cache
-    def _get_file(self, path) -> canvasapi.file.File:
+    def _folder_files(self, folder):
+        return folder.get_files()
+
+    @lru_cache
+    def _get_file(self, path, resource=None) -> canvasapi.file.File:
         try:
             file_path = os.path.join(*os.path.split(path)[:-1])
             file_name = os.path.split(path)[-1]
 
-            folder = self._resolve_path(file_path)[-1]
-            fc = [*filter(lambda f: f.display_name == file_name, folder.get_files())]
+            folder = self._resolve_path(file_path, resource)[-1]
+            files = self._folder_files(folder)
+            fc = [*filter(lambda f: f.display_name == file_name, files)]
             return fc[0]
         except IndexError:
             raise FuseOSError(ENOENT)
 
     @lru_cache
+    def _parse_resource(self, path) -> [Any, str]:
+
+        _, origin, *rest = Path(path).parts
+        print('rest =', rest)
+        path = os.path.join('/', *rest)
+
+        print('origin =', origin)
+        print('path =', path)
+        resource = self.map.get(origin, None)
+
+        return resource, path
+
+    @lru_cache
     def getattr(self, path, fh=None):
         print(f'getattr(self, "{path}", {fh})')
 
+        if path == '/':
+            return dict(
+                st_mode=(S_IFDIR | 0o755),
+                st_ctime=self.now,
+                st_mtime=self.now,
+                st_atime=self.now,
+                st_nlink=2,
+                st_uid=os.getuid(),
+                st_gid=os.getgid(),
+                st_size=len(self.map)
+            )
+
+        resource, path = self._parse_resource(path)
+
         try:
-            folders = self._resolve_path(path)
-            folder: canvasapi.folder.Folder
-            folder = folders[-1]
+            folder = self._resolve_path(path, resource=resource)[-1]
 
             return dict(
                 st_mode=(S_IFDIR | 0o755),
@@ -67,7 +104,7 @@ class Passthrough(LoggingMixIn, Operations):
             )
 
         except canvasapi.exceptions.ResourceDoesNotExist:
-            file = self._get_file(path)
+            file = self._get_file(path, resource=resource)
             return dict(
                 st_mode=(S_IFREG | 0o444),
                 st_ino=file.id,
@@ -88,7 +125,12 @@ class Passthrough(LoggingMixIn, Operations):
     def readdir(self, path, fh):
         print(f'readdir(self, {path}, {fh})')
 
-        rp = self._resolve_path(path)
+        if path == '/':
+            return ['.', '..'] + [*self.map.keys()]
+
+        resource, path = self._parse_resource(path)
+
+        rp = self._resolve_path(path, resource=resource)
         if not rp:
             return FuseOSError(ENONET)  # No such file or directory
 
@@ -158,7 +200,11 @@ def main(mountpoint, access_token):
 
 
 if __name__ == '__main__':
+    # logging.basicConfig(level=TRACE, stream=sys.stdout)
+
     import tempfile
-    with tempfile.TemporaryDirectory() as td:
+    # d = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mnt/')
+    d = '/mnt/fu/'
+    with tempfile.TemporaryDirectory(dir=d) as td:
         token = open('token.txt').read().strip()
         main(td, token)
