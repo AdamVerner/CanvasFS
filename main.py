@@ -154,7 +154,7 @@ def main(mountpoint, access_token):
     print(f'tree "{mountpoint}"')
     print(f'mkdir "{mountpoint}/test_folder"')
     print(f'file "{mountpoint}/profile pictures/profile.jpg"')
-    FUSE(Passthrough(access_token), mountpoint, nothreads=True, foreground=True)
+    FUSE(Passthrough(access_token), mountpoint, nothreads=True, foreground=True, allow_other=True)
 
 
 if __name__ == '__main__':
