@@ -2,9 +2,7 @@
 
 from __future__ import with_statement
 
-import logging
 import os
-import sys
 from errno import ENOENT, ENODATA, ENONET
 from functools import lru_cache
 from pathlib import Path
@@ -35,16 +33,16 @@ class Passthrough(LoggingMixIn, Operations):
         self.open_files = dict()
         self.map = {course.name: course for course in [*self.user.get_courses(), self.user]}
 
-    @lru_cache
+    @lru_cache(maxsize=None)
     def _resolve_path(self, path: str, resource=None) -> List[canvasapi.folder.Folder]:
         resource = resource or self.user
         return [*resource.resolve_path(path)]
 
-    @lru_cache
+    @lru_cache(maxsize=None)
     def _folder_files(self, folder):
         return folder.get_files()
 
-    @lru_cache
+    @lru_cache(maxsize=None)
     def _get_file(self, path, resource=None) -> canvasapi.file.File:
         try:
             file_path = os.path.join(*os.path.split(path)[:-1])
@@ -57,7 +55,7 @@ class Passthrough(LoggingMixIn, Operations):
         except IndexError:
             raise FuseOSError(ENOENT)
 
-    @lru_cache
+    @lru_cache(maxsize=None)
     def _parse_resource(self, path) -> [Any, str]:
 
         _, origin, *rest = Path(path).parts
@@ -70,7 +68,7 @@ class Passthrough(LoggingMixIn, Operations):
 
         return resource, path
 
-    @lru_cache
+    @lru_cache(maxsize=None)
     def getattr(self, path, fh=None):
         print(f'getattr(self, "{path}", {fh})')
 
@@ -121,7 +119,7 @@ class Passthrough(LoggingMixIn, Operations):
         print(f'getxattr(self, {path}, "{name}", {position})')
         raise FuseOSError(ENODATA)
 
-    @lru_cache
+    @lru_cache(maxsize=None)
     def readdir(self, path, fh):
         print(f'readdir(self, {path}, {fh})')
 
@@ -200,6 +198,8 @@ def main(mountpoint, access_token):
 
 
 if __name__ == '__main__':
+    import logging
+    import sys
     # logging.basicConfig(level=TRACE, stream=sys.stdout)
 
     import tempfile
