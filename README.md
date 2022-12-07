@@ -1,3 +1,6 @@
+  After droping one class i realized i dont need this project anymore, so i gave up :)
+  It still should somehow work as is, but no further effort will be put into the project.
+  
 # InstructureFS
 
 ## Usage
